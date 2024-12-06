@@ -3,6 +3,12 @@ const tf = require('@tensorflow/tfjs-node');
 const db = require('../utils/db');
 const admin = require('firebase-admin');
 const path = require('path');
+const fs = require('fs');
+
+// Memuat parameter scaler
+const scalerParams = JSON.parse(
+  fs.readFileSync(path.resolve(__dirname, '../ml-model/scaler.json'), 'utf8')
+);
 
 let model;
 
@@ -18,31 +24,29 @@ let model;
 })();
 
 function preprocessInput(inputArray) {
-  // Urutan fitur: energy, protein, fat, saturated_fat, sugars, fiber, salt
-  const means = [200, 10, 5, 2, 15, 3, 0.5];
-  const stds = [100, 5, 2, 1, 5, 1, 0.2];
+  const scale = scalerParams.scale;
+  const min_ = scalerParams.min;
 
-  const normalizedInput = inputArray.map((value, index) => (value - means[index]) / stds[index]);
-  return normalizedInput;
+  const scaledInput = inputArray.map((value, index) => {
+    return value * scale[index] + min_[index];
+  });
+
+  return scaledInput;
 }
 
 exports.predict = async (req, res) => {
   try {
-    const { energy, protein, fat, saturated_fat, sugars, fiber, salt } = req.body;
-    console.log('Received input:', { energy, protein, fat, saturated_fat, sugars, fiber, salt });
+    const { protein, energy, fat, saturated_fat, sugars, fiber, salt } = req.body;
+
+    // Pastikan urutan fitur sesuai dengan scaler dan model
+    const inputArray = [protein, energy, fat, saturated_fat, sugars, fiber, salt];
 
     // Validasi input
-    if ([energy, protein, fat, saturated_fat, sugars, fiber, salt].some(v => v === undefined)) {
+    if (inputArray.some(v => v === undefined || v === null)) {
       return res.status(400).json({ message: 'Semua input nutrisi wajib diisi' });
     }
 
-    // Pastikan model telah dimuat
-    if (!model) {
-      return res.status(500).json({ message: 'Model belum tersedia. Silakan coba lagi nanti.' });
-    }
-
     // Preprocessing input
-    const inputArray = [energy, protein, fat, saturated_fat, sugars, fiber, salt];
     const processedInput = preprocessInput(inputArray);
     console.log('Processed input:', processedInput);
 
@@ -60,7 +64,7 @@ exports.predict = async (req, res) => {
     // Menyimpan hasil prediksi ke riwayat
     await db.collection('history').add({
       userId: req.userId,
-      inputs: { energy, protein, fat, saturated_fat, sugars, fiber, salt },
+      inputs: { protein, energy, fat, saturated_fat, sugars, fiber, salt },
       grade,
       timestamp: admin.firestore.FieldValue.serverTimestamp(),
     });
@@ -74,7 +78,6 @@ exports.predict = async (req, res) => {
 
 // Fungsi untuk mengonversi prediksi menjadi grade
 function mapPredictionToGrade(predictionData) {
-  // Misalkan model mengeluarkan probabilitas untuk 5 kelas (A, B, C, D, E)
   const grades = ['A', 'B', 'C', 'D', 'E'];
   const maxIndex = predictionData.indexOf(Math.max(...predictionData));
   return grades[maxIndex];

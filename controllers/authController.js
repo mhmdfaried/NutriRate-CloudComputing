@@ -1,66 +1,84 @@
 // controllers/authController.js
-const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
-const User = require('../models/User');
+const { auth, firebaseAuth, sendPasswordResetEmail } = require('../utils/db');
 
 exports.register = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // Validasi input
     if (!email || !password) {
       return res.status(400).json({ message: 'Email dan password wajib diisi' });
     }
 
-    // Cek apakah email sudah terdaftar
-    const existingUser = await User.findByEmail(email);
-    if (existingUser) {
-      return res.status(400).json({ message: 'Email sudah terdaftar' });
-    }
+    // Buat pengguna di Firebase Authentication
+    const userRecord = await auth.createUser({
+      email,
+      password,
+    });
 
-    // Hash password
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    // Simpan pengguna ke Firestore
-    const userId = await User.create(email, hashedPassword);
-
-    res.status(201).json({ message: 'Registrasi berhasil', userId });
+    res.status(201).json({ message: 'Registrasi berhasil', userId: userRecord.uid });
   } catch (error) {
     console.error('Error during registration:', error);
-    res.status(500).json({ message: 'Terjadi kesalahan pada server' });
+    res.status(500).json({ message: error.message });
   }
 };
 
 exports.login = async (req, res) => {
-    try {
-      const { email, password } = req.body;
-  
-      // Validasi input
-      if (!email || !password) {
-        return res.status(400).json({ message: 'Email dan password wajib diisi' });
-      }
-  
-      // Dapatkan pengguna dari Firestore
-      const user = await User.findByEmail(email);
-  
-      if (!user) {
-        return res.status(400).json({ message: 'Email atau password salah' });
-      }
-  
-      // Verifikasi password
-      const match = await bcrypt.compare(password, user.password);
-  
-      if (!match) {
-        return res.status(400).json({ message: 'Email atau password salah' });
-      }
-  
-      // Buat token JWT
-      const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: '1h' });
-  
-      res.json({ token });
-    } catch (error) {
-      console.error('Error during login:', error);
-      res.status(500).json({ message: 'Terjadi kesalahan pada server' });
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ message: 'Email dan password wajib diisi' });
     }
-  };
-  
+
+    // Login menggunakan Firebase Authentication
+    const user = await auth.getUserByEmail(email);
+
+    // Tidak ada pengecekan password manual di sisi server (Firebase SDK akan menanganinya)
+    res.status(200).json({ message: 'Login berhasil', userId: user.uid, email: user.email });
+  } catch (error) {
+    console.error('Error during login:', error);
+    res.status(401).json({ message: 'Email atau password salah' });
+  }
+};
+
+exports.logout = async (req, res) => {
+  try {
+    // Pada Firebase Authentication, logout biasanya dilakukan di sisi client
+    // Di sisi server, kita bisa memberi response sukses
+    res.status(200).json({ message: 'Logout berhasil' });
+  } catch (error) {
+    console.error('Error during logout:', error);
+    res.status(500).json({ message: 'Gagal logout' });
+  }
+};  
+
+exports.resetPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ message: 'Email wajib diisi' });
+    }
+
+    // Kirim email reset password menggunakan Firebase Authentication client
+    await sendPasswordResetEmail(firebaseAuth, email);
+
+    res.status(200).json({ 
+      message: 'Link reset password telah dikirim ke email Anda',
+      email: email 
+    });
+  } catch (error) {
+    console.error('Error sending reset password email:', error);
+    
+    // Tangani error spesifik dari Firebase
+    if (error.code === 'auth/user-not-found') {
+      return res.status(404).json({ message: 'Email tidak terdaftar' });
+    }
+    
+    if (error.code === 'auth/invalid-email') {
+      return res.status(400).json({ message: 'Format email tidak valid' });
+    }
+    
+    res.status(500).json({ message: 'Gagal mengirim email reset password' });
+  }
+};

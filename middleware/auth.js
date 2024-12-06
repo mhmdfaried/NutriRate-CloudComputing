@@ -1,16 +1,18 @@
 // middleware/auth.js
-const jwt = require('jsonwebtoken');
+const { auth } = require('../utils/db');
 
-module.exports = (req, res, next) => {
+module.exports = async (req, res, next) => {
   const authHeader = req.headers['authorization'];
 
-  if (!authHeader) return res.status(401).json({ message: 'Token tidak tersedia' });
+  if (!authHeader) {
+    return res.status(401).json({ message: 'Token tidak tersedia' });
+  }
 
   const token = authHeader.split(' ')[1];
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.userId = decoded.id;
+    const decodedToken = await auth.verifyIdToken(token);
+    req.userId = decodedToken.uid; // ID pengguna Firebase
     next();
   } catch (err) {
     res.status(401).json({ message: 'Token tidak valid' });
