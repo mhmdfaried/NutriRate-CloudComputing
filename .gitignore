@@ -1,8 +1,0 @@
-# Ignore environment files
-.env
-nutrirate-442905-de2998827aca.json
-.gitignore
-# Ignore node_modules folder
-node_modules/
-utils/firebase-admin.json
-utils/firebase-admin-config.json
